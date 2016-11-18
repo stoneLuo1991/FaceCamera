@@ -1,5 +1,6 @@
 package android.luo.stone.facealigncamera;
 
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -11,36 +12,126 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.inputmethod.CorrectionInfo;
 import android.widget.Button;
 import android.widget.ImageView;
 
+import org.opencv.android.BaseLoaderCallback;
+import org.opencv.android.LoaderCallbackInterface;
+import org.opencv.android.OpenCVLoader;
+import org.opencv.android.Utils;
+import org.opencv.core.Core;
+import org.opencv.core.Mat;
+import org.opencv.core.MatOfRect;
+import org.opencv.core.Rect;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
+import org.opencv.imgproc.Imgproc;
+import org.opencv.objdetect.CascadeClassifier;
+
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 
 public class MainActivity extends AppCompatActivity {
 
     /********************************************************************************
      * ***********************主活动只要涉及的是拍照功能和打开相册功能***********************
      ******************************************************************************/
-    private Button takePhoto, choosePhoto;
+    private static final String TAG = "MainActivity";
     private static final int TAKE_PHOTO = 1;
-    private static final int CROP_PHOTO = 2;
+    private static final int SHOW_PHOTO = 2;
     private static final int CHOOSE_PHOTO = 3;
     private Uri imageUri;
     private ImageView picture;
+    private CascadeClassifier haarCascade;
+    private File cascadeDir, mCascadeFile;
+    private Button detectFace;
+
+    /********************************************************************************
+     * ***********************c*******库的加载************************************
+     ******************************************************************************/
+
+    static {
+        //opencv load
+       if(OpenCVLoader.initDebug()) {
+           Log.d(TAG, "Opencv loaded successful!");
+       }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        /********************************************************************************
+         * ***********************c*******创建并显示菜单************************************
+         ******************************************************************************/
+
+        //装载人脸识别的库文件
+        try {
+            Log.d(TAG, "Cascade loaded successful!");
+            //把项目的训练资源拷贝到手机
+            InputStream is = getResources().openRawResource(R.raw.haarcascade_frontalface_default);
+            cascadeDir = getDir("cascade", Context.MODE_PRIVATE);
+            mCascadeFile = new File(cascadeDir, "haarcascade_frontalface_default.xml");
+            FileOutputStream os = new FileOutputStream(mCascadeFile);
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = is.read(buffer)) != -1) {
+                os.write(buffer, 0, bytesRead);
+            }
+            is.close();
+            os.close();
+            haarCascade = new CascadeClassifier(mCascadeFile.getAbsolutePath());
+            if (haarCascade.empty()) {
+                haarCascade = null;
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Cascade not found!");
+        }
+
+        detectFace = (Button) findViewById(R.id.detect_face);
+        detectFace.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                try {
+                    final Bitmap bitmap = BitmapFactory.decodeStream(getContentResolver().openInputStream(imageUri));
+                    final Mat rgbMat = new Mat();
+                    final Mat grayMat = new Mat();
+                    Utils.bitmapToMat(bitmap, rgbMat);
+                    Imgproc.cvtColor(rgbMat, grayMat, Imgproc.COLOR_RGB2GRAY);
+                    MatOfRect faces = new MatOfRect();
+                    /********************************************************************************
+                     * ***********************c*******人脸检测************************************
+                     ******************************************************************************/
+                    if (haarCascade != null) {
+                        haarCascade.detectMultiScale( grayMat , faces, 1.1, 2, 0 ,new Size(200, 200), new Size() );
+                    }
+                    //画框
+                    Rect[] facesArray = faces.toArray();
+                    for (int i = 0; i < facesArray.length; i++) {
+                        Core.rectangle(rgbMat, facesArray[i].tl(), facesArray[i].br(), new Scalar(0, 255, 0), 3);
+                    }
+                    Bitmap bitmap1 = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.RGB_565);
+                    Utils.matToBitmap(rgbMat, bitmap1);
+
+                    picture = (ImageView) findViewById(R.id.show_image);
+                    picture.setImageBitmap(bitmap1);
+
+                } catch (FileNotFoundException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
     }
-    /********************************************************************************
-     * ***********************c*******创建并显示菜单************************************
-     ******************************************************************************/
+
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         // Inflate the menu; this adds items to the action bar if it is present.
@@ -72,8 +163,14 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(it,TAKE_PHOTO);
         }
         else if (id == R.id.choose_photo){
-            Intent intent = new Intent(Intent.ACTION_PICK, Uri.parse("content://media/internal/images/media"));
-            startActivityForResult(intent, CHOOSE_PHOTO);
+            Intent intent = new Intent();
+            //Intent intent = new Intent();
+            intent.setType("image/*");
+            intent.setAction(Intent.ACTION_GET_CONTENT);
+            startActivityForResult(intent,CHOOSE_PHOTO);
+            //Intent intent = new Intent(Intent.ACTION_PICK, Uri.parse("content://media/internal/images/media"));
+            //startActivityForResult(intent, CHOOSE_PHOTO);
+            //打开相册后直接调用识别程序
         }
         return super.onOptionsItemSelected(item);
     }
@@ -89,7 +186,7 @@ public class MainActivity extends AppCompatActivity {
                     //向剪切图片中夹带数据（实际主要夹带的地址）
                     second.putExtra("scale", true);
                     second.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
-                    startActivityForResult(second,CROP_PHOTO);
+                    startActivityForResult(second,SHOW_PHOTO);
                     /********************************************************************************
                      * ***********************c*******调用识别系统************************************
                      ******************************************************************************//********************************************************************************
@@ -99,7 +196,7 @@ public class MainActivity extends AppCompatActivity {
                      ******************************************************************************/
                 }
                 break;
-            case CROP_PHOTO:
+            case SHOW_PHOTO:
                 if (resultCode == RESULT_OK) {
                     try {
                         //解析图像的地址以方便显示
@@ -113,11 +210,11 @@ public class MainActivity extends AppCompatActivity {
                 break;
             case CHOOSE_PHOTO:
                 if (resultCode == RESULT_OK) {
-                    //获取intent中data（图像数据）的Uri（通用资源标识）
-                    Uri selectedImage = data.getData();
+                   /* //获取intent中data（图像数据）的Uri（通用资源标识）
+                    Uri imageUri = data.getData();
                     String[] filePathColumn = {MediaStore.Images.Media.DATA};
                     //Cursor类保存图像的绝对路径
-                    Cursor cursor = getContentResolver().query(selectedImage, filePathColumn, null, null, null);
+                    Cursor cursor = getContentResolver().query(imageUri, filePathColumn, null, null, null);
                     cursor.moveToFirst();
                     int columnIndex = cursor.getColumnIndex(filePathColumn[0]);
                     String picturePath = cursor.getString(columnIndex);
@@ -141,7 +238,17 @@ public class MainActivity extends AppCompatActivity {
                     rotate90.postRotate(orientation);
                     Bitmap originalBitmap = rotateBitmap(temp, orientation);
                     picture = (ImageView) findViewById(R.id.show_image);
-                    picture.setImageBitmap(originalBitmap);
+                    picture.setImageBitmap(originalBitmap);  */
+                    imageUri = data.getData();
+                    //图像显示
+                    try {
+                        //解析图像的地址以方便显示
+                        Bitmap bitmap = BitmapFactory.decodeStream(getContentResolver().openInputStream(imageUri));
+                        picture = (ImageView) findViewById(R.id.show_image);
+                        picture.setImageBitmap(bitmap);
+                    } catch (FileNotFoundException e) {
+                        e.printStackTrace();
+                    }
                 }
                 }
         }
@@ -189,6 +296,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
     }
+    /********************************************************************************
+     * ***********************c*******人脸检测************************************
+     ******************************************************************************/
 
 }
      /*   //调用摄像头拍照
