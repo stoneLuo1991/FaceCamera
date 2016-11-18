@@ -143,7 +143,16 @@ public class MainActivity extends AppCompatActivity {
         int id = item.getItemId();//获取菜单的id
 
         if (id == R.id.take_photo) {
-            File outputImage = new File(Environment.getExternalStorageDirectory(), "output_image.jpg");
+
+            /********************************************************************************
+             * ***********************c*******2016/11/18 17:00************************************
+             * * ***********************c*****加入相机存盘程序***********************************
+             ******************************************************************************/
+            String dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).toString();
+            String fname = "p" + System.currentTimeMillis() + ".jpg";
+            imageUri = Uri.parse("file://" + dir + "/" + fname);
+            Intent it = new Intent("android.media.action.IMAGE_CAPTURE");
+           /* File outputImage = new File(Environment.getExternalStorageDirectory(), "output_image.jpg");
             try {
                 //如果根目录已经有了相片则删除，并创建新的File保存图片文件
                 if (outputImage.exists()) {
@@ -156,7 +165,7 @@ public class MainActivity extends AppCompatActivity {
             //设置启动活动的信使intent（想要启动拍照）
             Intent it = new Intent("android.media.action.IMAGE_CAPTURE");
             //从File文件读取图片你的Uri地址
-            imageUri = Uri.fromFile(outputImage);
+            imageUri = Uri.fromFile(outputImage);*/
             //把地址赋值给拍摄到的图片
             it.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
             //启动信使，调用拍照功能 TAKE_PHOTO作为启动的标记
